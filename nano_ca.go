@@ -61,19 +61,9 @@ func (g *Pki) InitCaFromPem(pemBytes []byte) error {
 				g.caKey = nil
 				return errors.New("the certificate provided is not a CA certificate")
 			}
-		case "RSA PRIVATE KEY": //RSA
+		case pemHeaderRSA, pemHeaderECDSA, pemHeaderED25519:
 			g.caKey = new(PrivateKey)
-			if err = g.caKey.ParseBytes(pemBlock.Bytes, Rsa); err != nil {
-				return err
-			}
-		case "EC PRIVATE KEY": //ECDSA
-			g.caKey = new(PrivateKey)
-			if err = g.caKey.ParseBytes(pemBlock.Bytes, Ecdsa); err != nil {
-				return err
-			}
-		case "PRIVATE KEY": //ED25519
-			g.caKey = new(PrivateKey)
-			if err = g.caKey.ParseBytes(pemBlock.Bytes, Ed25519); err != nil {
+			if err = g.caKey.ParsePemBytes(pemBlock.Bytes); err != nil {
 				return err
 			}
 		default:

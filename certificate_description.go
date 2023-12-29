@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// CertificateDescription represents the different certificate parameters to use to generate it.
 type CertificateDescription struct {
 	commonName              string
 	subjectAlternativeNames []string
@@ -25,6 +26,10 @@ type CertificateDescription struct {
 	keyUsage                x509.KeyUsage
 	basicConstraintsValid   bool
 }
+
+/////////////
+// Getters //
+/////////////
 
 func (cd *CertificateDescription) GetCommonName() string {
 	return cd.commonName
@@ -77,7 +82,6 @@ func (cd *CertificateDescription) GetSerialNumber() *big.Int {
 	var sn big.Int = cd.serialNumber
 	return &sn
 }
-
 func (cd *CertificateDescription) GetSubject() pkix.Name {
 	return pkix.Name{
 		Country:            cd.GetCountry(),
@@ -91,24 +95,16 @@ func (cd *CertificateDescription) GetSubject() pkix.Name {
 	}
 }
 
+/////////////
+// Setters //
+/////////////
+
 func (cd *CertificateDescription) SetCommonName(cn string) *CertificateDescription {
 	cd.commonName = cn
 	return cd
 }
 func (cd *CertificateDescription) SetSubjectAlternativeNames(san []string) *CertificateDescription {
 	copy(cd.subjectAlternativeNames, san)
-	return cd
-}
-func (cd *CertificateDescription) ClearSubjectAlternativeNames() *CertificateDescription {
-	cd.subjectAlternativeNames = make([]string, 0)
-	return cd
-}
-func (cd *CertificateDescription) AddSubjectAlternativeName(san string) *CertificateDescription {
-	cd.subjectAlternativeNames = append(cd.subjectAlternativeNames, san)
-	return cd
-}
-func (cd *CertificateDescription) SetSerialNumber(sn *big.Int) *CertificateDescription {
-	cd.serialNumber = *sn
 	return cd
 }
 func (cd *CertificateDescription) SetOrganization(organization string) *CertificateDescription {
@@ -147,7 +143,7 @@ func (cd *CertificateDescription) SetNotValidAfter(notValidAfter time.Time) *Cer
 	cd.notValidAfter = notValidAfter
 	return cd
 }
-func (cd *CertificateDescription) WantCA() *CertificateDescription {
+func (cd *CertificateDescription) SetIsCA() *CertificateDescription {
 	cd.isCa = true
 	return cd
 }
@@ -155,28 +151,42 @@ func (cd *CertificateDescription) SetExtKeyUsage(extKeyUsage []x509.ExtKeyUsage)
 	copy(cd.extKeyUsage, extKeyUsage)
 	return cd
 }
-func (cd *CertificateDescription) ClearExtKeyUsage() *CertificateDescription {
-	cd.extKeyUsage = make([]x509.ExtKeyUsage, 0)
+func (cd *CertificateDescription) SetKeyUsage(ku x509.KeyUsage) *CertificateDescription {
+	cd.keyUsage = ku
+	return cd
+}
+func (cd *CertificateDescription) SetBasicConstraintsValid(basicConstraintsValid bool) *CertificateDescription {
+	cd.basicConstraintsValid = basicConstraintsValid
+	return cd
+}
+func (cd *CertificateDescription) SetSerialNumber(sn *big.Int) *CertificateDescription {
+	cd.serialNumber = *sn
+	return cd
+}
+
+func (cd *CertificateDescription) AddSubjectAlternativeName(san string) *CertificateDescription {
+	cd.subjectAlternativeNames = append(cd.subjectAlternativeNames, san)
 	return cd
 }
 func (cd *CertificateDescription) AddExtKeyUsage(eku x509.ExtKeyUsage) *CertificateDescription {
 	cd.extKeyUsage = append(cd.extKeyUsage, eku)
 	return cd
 }
-func (cd *CertificateDescription) SetKeyUsage(ku x509.KeyUsage) *CertificateDescription {
-	cd.keyUsage = ku
-	return cd
-}
-func (cd *CertificateDescription) ClearKeyUsage() *CertificateDescription {
-	cd.keyUsage = 0
-	return cd
-}
 func (cd *CertificateDescription) AddKeyUsage(ku x509.KeyUsage) *CertificateDescription {
 	cd.keyUsage = cd.keyUsage | ku
 	return cd
 }
-func (cd *CertificateDescription) SetBasicConstraintsValid(basicConstraintsValid bool) *CertificateDescription {
-	cd.basicConstraintsValid = basicConstraintsValid
+
+func (cd *CertificateDescription) ClearSubjectAlternativeNames() *CertificateDescription {
+	cd.subjectAlternativeNames = make([]string, 0)
+	return cd
+}
+func (cd *CertificateDescription) ClearExtKeyUsage() *CertificateDescription {
+	cd.extKeyUsage = make([]x509.ExtKeyUsage, 0)
+	return cd
+}
+func (cd *CertificateDescription) ClearKeyUsage() *CertificateDescription {
+	cd.keyUsage = 0
 	return cd
 }
 
