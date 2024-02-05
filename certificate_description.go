@@ -148,6 +148,7 @@ func (cd *CertificateDescription) SetIsCA() *CertificateDescription {
 	return cd
 }
 func (cd *CertificateDescription) SetExtKeyUsage(extKeyUsage []x509.ExtKeyUsage) *CertificateDescription {
+	cd.extKeyUsage = make([]x509.ExtKeyUsage, len(extKeyUsage))
 	copy(cd.extKeyUsage, extKeyUsage)
 	return cd
 }

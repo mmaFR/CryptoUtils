@@ -25,9 +25,9 @@ const (
 
 const (
 	errKeyNotYetInitialized string = "key pair not yet initialized"
-	pemHeaderRSA            string = "RSA PRIVATE KEY"
-	pemHeaderECDSA                 = "EC PRIVATE KEY"
-	pemHeaderED25519               = "PRIVATE KEY"
+	pemHeaderPrivateRSA     string = "RSA PRIVATE KEY"
+	pemHeaderPrivateECDSA   string = "EC PRIVATE KEY"
+	pemHeaderPrivateED25519 string = "PRIVATE KEY"
 )
 
 const (
@@ -37,9 +37,9 @@ const (
 
 // PrivateKey key type (rsa, ecdsa, or ed25519) abstraction
 type PrivateKey struct {
-	rsaKey         *rsa.PrivateKey
-	ecdsaKey       *ecdsa.PrivateKey
-	ed25519PrivKey ed25519.PrivateKey
+	rsaKey     *rsa.PrivateKey
+	ecdsaKey   *ecdsa.PrivateKey
+	ed25519Key ed25519.PrivateKey
 }
 
 // Public returns the public key as crypto.PublicKey for the key type in use.
@@ -52,7 +52,7 @@ func (pk *PrivateKey) Public() crypto.PublicKey {
 	case Ecdsa:
 		return pk.ecdsaKey.Public()
 	case Ed25519:
-		return pk.ed25519PrivKey.Public()
+		return pk.ed25519Key.Public()
 	default:
 		return nil
 	}
@@ -68,7 +68,7 @@ func (pk *PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 	case Ecdsa:
 		return pk.ecdsaKey.Sign(rand, digest, opts)
 	case Ed25519:
-		return pk.ed25519PrivKey.Sign(rand, digest, opts)
+		return pk.ed25519Key.Sign(rand, digest, opts)
 	case keyNotSet:
 		return nil, errors.New("key not yet set")
 	default:
@@ -80,7 +80,7 @@ func (pk *PrivateKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 func (pk *PrivateKey) Reset() {
 	pk.rsaKey = nil
 	pk.ecdsaKey = nil
-	pk.ed25519PrivKey = nil
+	pk.ed25519Key = nil
 }
 
 // GetType returns the key type in use
@@ -90,7 +90,7 @@ func (pk *PrivateKey) GetType() KeyType {
 		return Rsa
 	case pk.ecdsaKey != nil:
 		return Ecdsa
-	case pk.ed25519PrivKey != nil:
+	case pk.ed25519Key != nil:
 		return Ed25519
 	default:
 		return keyNotSet
@@ -104,7 +104,7 @@ func (pk *PrivateKey) GetType() KeyType {
 // GenerateRsa generates an RSA key, resets the other keys and returns any error encountered
 func (pk *PrivateKey) GenerateRsa(size int) (err error) {
 	pk.rsaKey, err = rsa.GenerateKey(rand.Reader, size)
-	pk.ed25519PrivKey = nil
+	pk.ed25519Key = nil
 	pk.ecdsaKey = nil
 	return
 }
@@ -112,7 +112,7 @@ func (pk *PrivateKey) GenerateRsa(size int) (err error) {
 // GenerateEcdsa generates an ECDSA key, resets the other keys and returns any error encountered
 func (pk *PrivateKey) GenerateEcdsa(curve elliptic.Curve) (err error) {
 	pk.rsaKey = nil
-	pk.ed25519PrivKey = nil
+	pk.ed25519Key = nil
 	pk.ecdsaKey, err = ecdsa.GenerateKey(curve, rand.Reader)
 	return
 }
@@ -121,7 +121,7 @@ func (pk *PrivateKey) GenerateEcdsa(curve elliptic.Curve) (err error) {
 func (pk *PrivateKey) GenerateEd25519() (err error) {
 	pk.rsaKey = nil
 	pk.ecdsaKey = nil
-	_, pk.ed25519PrivKey, err = ed25519.GenerateKey(rand.Reader)
+	_, pk.ed25519Key, err = ed25519.GenerateKey(rand.Reader)
 	return
 }
 
@@ -149,11 +149,11 @@ func (pk *PrivateKey) GetPrivateEcdsa() (*ecdsa.PrivateKey, error) {
 
 // GetPrivateEd25519 returns the embedded ED25519 private key as *ed25519.PrivateKey and an error if it is not the key type in use
 func (pk *PrivateKey) GetPrivateEd25519() (ed25519.PrivateKey, error) {
-	if pk.ed25519PrivKey == nil {
+	if pk.ed25519Key == nil {
 		return nil, errors.New(errKeyNotYetInitialized)
 	}
 	var keyCopy ed25519.PrivateKey
-	copy(keyCopy, pk.ed25519PrivKey)
+	copy(keyCopy, pk.ed25519Key)
 	keyCopy.Public()
 	return keyCopy, nil
 }
@@ -165,7 +165,7 @@ func (pk *PrivateKey) getPrivate() crypto.PrivateKey {
 	case Ecdsa:
 		return pk.ecdsaKey
 	case Ed25519:
-		return pk.ed25519PrivKey
+		return pk.ed25519Key
 	default:
 		return nil
 	}
@@ -196,7 +196,7 @@ func (pk *PrivateKey) GetPublicEcdsa() (*ecdsa.PublicKey, error) {
 // GetPublicEd25519 returns the embedded ED25519 public key as *ed25519.PublicKey and an error if it is not the key type in use
 func (pk *PrivateKey) GetPublicEd25519() (ed25519.PublicKey, error) {
 	var keyPub []byte = make([]byte, ed25519.PublicKeySize)
-	copy(keyPub, pk.ed25519PrivKey[32:])
+	copy(keyPub, pk.ed25519Key[32:])
 	return keyPub, nil
 }
 
@@ -221,21 +221,20 @@ func (pk *PrivateKey) encodeKeyAsPem(kind KeyKind) (pemBytes []byte, err error) 
 	if kind == Private {
 		switch keyType {
 		case Rsa:
-			pemBlock.Type = "RSA PRIVATE KEY"
+			pemBlock.Type = pemHeaderPrivateRSA
 			pemBlock.Bytes = x509.MarshalPKCS1PrivateKey(pk.rsaKey)
 			pemBytes = pem.EncodeToMemory(pemBlock)
 			return
 		case Ecdsa:
-			pemBlock.Type = "EC PRIVATE KEY"
+			pemBlock.Type = pemHeaderPrivateECDSA
 			if pemBlock.Bytes, err = x509.MarshalECPrivateKey(pk.ecdsaKey); err != nil {
 				return nil, err
 			}
 			pemBytes = pem.EncodeToMemory(pemBlock)
 			return
 		case Ed25519:
-			//return nil, errors.New("ed25519 not yet fully supported")
-			pemBlock.Type = "PRIVATE KEY"
-			if pemBlock.Bytes, err = x509.MarshalPKCS8PrivateKey(pk.ed25519PrivKey); err != nil {
+			pemBlock.Type = pemHeaderPrivateED25519
+			if pemBlock.Bytes, err = x509.MarshalPKCS8PrivateKey(pk.ed25519Key); err != nil {
 				return nil, err
 			}
 			pemBytes = pem.EncodeToMemory(pemBlock)
@@ -247,12 +246,12 @@ func (pk *PrivateKey) encodeKeyAsPem(kind KeyKind) (pemBytes []byte, err error) 
 	} else {
 		switch keyType {
 		case Rsa:
-			pemBlock.Type = "RSA PUBLIC KEY"
+			pemBlock.Type = pemHeaderPublicRSA
 			pemBlock.Bytes = x509.MarshalPKCS1PublicKey(&pk.rsaKey.PublicKey)
 			pemBytes = pem.EncodeToMemory(pemBlock)
 			return
 		case Ecdsa:
-			pemBlock.Type = "PUBLIC KEY"
+			pemBlock.Type = pemHeaderPublicECDSA
 			pemBlock.Bytes, err = x509.MarshalPKIXPublicKey(pk.ecdsaKey)
 			if err != nil {
 				return nil, err
@@ -260,8 +259,8 @@ func (pk *PrivateKey) encodeKeyAsPem(kind KeyKind) (pemBytes []byte, err error) 
 			pemBytes = pem.EncodeToMemory(pemBlock)
 			return
 		case Ed25519:
-			pemBlock.Type = "PUBLIC KEY"
-			if pemBlock.Bytes, err = x509.MarshalPKIXPublicKey(pk.ed25519PrivKey.Public()); err != nil {
+			pemBlock.Type = pemHeaderPublicED25519
+			if pemBlock.Bytes, err = x509.MarshalPKIXPublicKey(pk.ed25519Key.Public()); err != nil {
 				return nil, err
 			}
 			pemBytes = pem.EncodeToMemory(pemBlock)
@@ -332,9 +331,39 @@ func (pk *PrivateKey) parseDerBytesAsEd25519(der []byte) error {
 	}
 	switch key.(type) {
 	case ed25519.PrivateKey:
-		pk.ed25519PrivKey = key.(ed25519.PrivateKey)
+		pk.ed25519Key = key.(ed25519.PrivateKey)
 	default:
 		return errors.New("the private key should be an ed25519 key but it is not")
 	}
 	return nil
+}
+
+////////////////////////
+// Message decryption //
+////////////////////////
+
+// DecryptMessage expects an encrypted message as a slice of bytes, and returns the decrypted message and an error if any
+func (pk *PrivateKey) DecryptMessage(msg []byte) ([]byte, error) {
+	switch pk.GetType() {
+	case Rsa:
+		return pk.decryptMessageWithRsa(msg)
+	case Ecdsa:
+		return pk.decryptMessageWithEcdsa(msg)
+	case Ed25519:
+		return pk.decryptMessageWithEd25519(msg)
+	case keyNotSet:
+		return nil, errors.New("the private is not yet set")
+	default:
+		return nil, errors.New("key type is unknown, unexpected error")
+	}
+}
+
+func (pk *PrivateKey) decryptMessageWithRsa(msg []byte) ([]byte, error) {
+	return rsa.DecryptPKCS1v15(rand.Reader, pk.rsaKey, msg)
+}
+func (pk *PrivateKey) decryptMessageWithEcdsa(msg []byte) ([]byte, error) {
+	return nil, errors.New("ecdsa key is not supported for decryption/encryption")
+}
+func (pk *PrivateKey) decryptMessageWithEd25519(msg []byte) ([]byte, error) {
+	return nil, errors.New("ed25519 key is not supported for decryption/encryption")
 }

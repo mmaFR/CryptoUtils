@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -26,16 +27,16 @@ type Pki struct {
 }
 
 // ResetCa resets the internal CA and certificate
-func (g *Pki) ResetCa() {
-	g.caKey = nil
-	g.caCert = nil
-	g.ResetLeaf()
+func (p *Pki) ResetCa() {
+	p.caKey = nil
+	p.caCert = nil
+	p.ResetLeaf()
 }
 
 // ResetLeaf resets the internal certificate
-func (g *Pki) ResetLeaf() {
-	g.key = nil
-	g.cert = nil
+func (p *Pki) ResetLeaf() {
+	p.key = nil
+	p.cert = nil
 }
 
 // InitCaFromPem InitCa expects a CA certificate in PEM format as a bytes slice
@@ -43,7 +44,7 @@ func (g *Pki) ResetLeaf() {
 //   - the cert and/or the key are not present.
 //   - a pem block with an unsupported type is encountered
 //   - the certificate and the private key don't match
-func (g *Pki) InitCaFromPem(pemBytes []byte) error {
+func (p *Pki) InitCaFromPem(pemBytes []byte) error {
 	var err error
 	var pemBlock *pem.Block
 	var rest []byte
@@ -56,74 +57,84 @@ func (g *Pki) InitCaFromPem(pemBytes []byte) error {
 				return err
 			}
 			if caCert.IsCA {
-				g.caCert = caCert
+				p.caCert = caCert
 			} else {
-				g.caKey = nil
-				return errors.New("the certificate provided is not a CA certificate")
+				p.caKey = nil
+				return ErrCertIsNotACaCert
 			}
-		case pemHeaderRSA, pemHeaderECDSA, pemHeaderED25519:
-			g.caKey = new(PrivateKey)
-			if err = g.caKey.ParsePemBytes(pemBlock.Bytes); err != nil {
+		case pemHeaderPrivateRSA:
+			p.caKey = new(PrivateKey)
+			if err = p.caKey.parseDerBytesAsRsa(pemBlock.Bytes); err != nil {
+				return err
+			}
+		case pemHeaderPrivateECDSA:
+			p.caKey = new(PrivateKey)
+			if err = p.caKey.parseDerBytesAsEcdsa(pemBlock.Bytes); err != nil {
+				return err
+			}
+		case pemHeaderPrivateED25519:
+			p.caKey = new(PrivateKey)
+			if err = p.caKey.parseDerBytesAsEd25519(pemBlock.Bytes); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("the pem block type \"%s\" is not supported", pemBlock.Type)
+			return ErrPemBlockTypeNotSupported
 		}
 	}
 	switch {
-	case g.caCert == nil:
-		return errors.New("the CA certificate is missing")
-	case g.caKey == nil:
-		return errors.New("the CA private key is missing")
-	case !g.keyPairIsValid(g.caKey.getPrivate(), g.caCert.PublicKey):
-		g.caCert = nil
-		g.caKey = nil
-		return errors.New("the private key doesn't match the certificate public key")
+	case p.caCert == nil:
+		return ErrCaCertIsMissing
+	case p.caKey == nil:
+		return ErrCaPrivateKeyIsMissing
+	case !p.keyPairIsValid(p.caKey.getPrivate(), p.caCert.PublicKey):
+		p.caCert = nil
+		p.caKey = nil
+		return ErrCertDoesntMatchKey
 	}
 	return nil
 }
 
 // GenerateCertRsaKeys generates an RSA private key for the certificate with a length of keySize (int)
-func (g *Pki) GenerateCertRsaKeys(keySize int) error {
-	return g.generateKeys(Rsa, keySize, nil, false)
+func (p *Pki) GenerateCertRsaKeys(keySize int) error {
+	return p.generateKeys(Rsa, keySize, nil, false)
 }
 
 // GenerateCaRsaKeys generates an RSA private key for the CA certificate with a length of keySize (int)
-func (g *Pki) GenerateCaRsaKeys(keySize int) error {
-	return g.generateKeys(Rsa, keySize, nil, true)
+func (p *Pki) GenerateCaRsaKeys(keySize int) error {
+	return p.generateKeys(Rsa, keySize, nil, true)
 }
 
 // GenerateCertEcdsaKeys generates an ECDSA private key for the certificate based on the curve provided as argument
-func (g *Pki) GenerateCertEcdsaKeys(curve elliptic.Curve) error {
-	return g.generateKeys(Ecdsa, 0, curve, false)
+func (p *Pki) GenerateCertEcdsaKeys(curve elliptic.Curve) error {
+	return p.generateKeys(Ecdsa, 0, curve, false)
 }
 
 // GenerateCaEcdsaKeys generates an ECDSA private key for the CA certificate based on the curve provided as argument
-func (g *Pki) GenerateCaEcdsaKeys(curve elliptic.Curve) error {
-	return g.generateKeys(Ecdsa, 0, curve, true)
+func (p *Pki) GenerateCaEcdsaKeys(curve elliptic.Curve) error {
+	return p.generateKeys(Ecdsa, 0, curve, true)
 }
 
 // GenerateCertEd25519Keys generates an ED25519 private key for the certificate
-func (g *Pki) GenerateCertEd25519Keys() error {
-	return g.generateKeys(Ed25519, 0, nil, false)
+func (p *Pki) GenerateCertEd25519Keys() error {
+	return p.generateKeys(Ed25519, 0, nil, false)
 }
 
 // GenerateCaEd25519Keys generates an ED25519 private key for the CA certificate
-func (g *Pki) GenerateCaEd25519Keys() error {
-	return g.generateKeys(Ed25519, 0, nil, true)
+func (p *Pki) GenerateCaEd25519Keys() error {
+	return p.generateKeys(Ed25519, 0, nil, true)
 }
 
 // generateKeys generates a private key
-func (g *Pki) generateKeys(keyType KeyType, keySize int, curve elliptic.Curve, ca bool) error {
+func (p *Pki) generateKeys(keyType KeyType, keySize int, curve elliptic.Curve, ca bool) error {
 	var target *PrivateKey
 	if ca {
-		g.caKey = new(PrivateKey)
-		target = g.caKey
-		g.caCert = nil
+		p.caKey = new(PrivateKey)
+		target = p.caKey
+		p.caCert = nil
 	} else {
-		g.key = new(PrivateKey)
-		target = g.key
-		g.cert = nil
+		p.key = new(PrivateKey)
+		target = p.key
+		p.cert = nil
 	}
 
 	switch keyType {
@@ -138,24 +149,26 @@ func (g *Pki) generateKeys(keyType KeyType, keySize int, curve elliptic.Curve, c
 	case Ed25519:
 		return target.GenerateEd25519()
 	default:
-		return errors.New("unexpected error during keys generation")
+		return ErrUnknownKeyType
 	}
 }
 
 // GenerateCaCert generates the CA certificate based on the certificate description provided
-func (g *Pki) GenerateCaCert(desc *CertificateDescription) error {
+func (p *Pki) GenerateCaCert(desc *CertificateDescription) error {
 	var err error
 
 	if desc == nil {
 		return fmt.Errorf("no certificate description provided")
 	}
 
-	if g.caKey == nil {
-		err = g.GenerateCaRsaKeys(defaultRsaKeySize)
+	if p.caKey == nil {
+		err = p.GenerateCaRsaKeys(defaultRsaKeySize)
 		if err != nil {
 			return fmt.Errorf("the ca key was not set, error encountered while generating it with the default values: %v", err)
 		}
 	}
+
+	desc.keyUsage = desc.keyUsage | x509.KeyUsageCertSign
 
 	//g.caCert = &x509.Certificate{
 	//	SerialNumber: desc.serialNumber,
@@ -199,21 +212,21 @@ func (g *Pki) GenerateCaCert(desc *CertificateDescription) error {
 	//	//CRLDistributionPoints:       nil,
 	//	//PolicyIdentifiers:           nil,
 	//}
-	g.caCert = desc.getCertificate()
+	p.caCert = desc.getCertificate()
 
 	return nil
 }
 
 // GenerateCert generates the certificate based on the certificate description provided
-func (g *Pki) GenerateCert(desc *CertificateDescription) error {
+func (p *Pki) GenerateCert(desc *CertificateDescription) error {
 	var err error
 
 	if desc == nil {
 		return fmt.Errorf("no certificate description provided")
 	}
 
-	if g.key == nil {
-		err = g.GenerateCertRsaKeys(defaultRsaKeySize)
+	if p.key == nil {
+		err = p.GenerateCertRsaKeys(defaultRsaKeySize)
 		if err != nil {
 			return fmt.Errorf("the certificate key was not set, error encountered while generating it with the default values: %v", err)
 		}
@@ -267,33 +280,38 @@ func (g *Pki) GenerateCert(desc *CertificateDescription) error {
 	//	CRLDistributionPoints:       nil,
 	//	PolicyIdentifiers:           nil,
 	//}
-	g.cert = desc.getCertificate()
+	p.cert = desc.getCertificate()
 
 	return nil
 }
 
 // ExportCa exports the CA certificate with the related private key in the expected format (only the PEM format is supported so far)
-func (g *Pki) ExportCa(format ExportFormat) ([]byte, error) {
-	return g.export(format, true)
+func (p *Pki) ExportCa(format ExportFormat) ([]byte, error) {
+	return p.export(format, true)
+}
+
+// GetCaCert return the CA certificate
+func (p *Pki) GetCaCert() *x509.Certificate {
+	return p.caCert
 }
 
 // ExportCert exports the certificate with the related private key in the expected format (only the PEM format is supported so far)
-func (g *Pki) ExportCert(format ExportFormat) ([]byte, error) {
-	return g.export(format, false)
+func (p *Pki) ExportCert(format ExportFormat) ([]byte, error) {
+	return p.export(format, false)
 }
 
 // export exports a certificate and returns an error when the desired format is not supported
-func (g *Pki) export(format ExportFormat, ca bool) ([]byte, error) {
+func (p *Pki) export(format ExportFormat, ca bool) ([]byte, error) {
 	switch format {
 	case FormatPEM:
-		return g.exportAsPem(ca)
+		return p.exportAsPem(ca)
 	default:
-		return nil, errors.New("unsupported export format")
+		return nil, ErrExportFormatNotSupported
 	}
 }
 
 // exportAsPem exports a certificate in PEM format
-func (g *Pki) exportAsPem(ca bool) ([]byte, error) {
+func (p *Pki) exportAsPem(ca bool) ([]byte, error) {
 	var err error
 	var keyPub crypto.PublicKey
 	var caCert *x509.Certificate
@@ -302,52 +320,52 @@ func (g *Pki) exportAsPem(ca bool) ([]byte, error) {
 	var pemBlock = new(pem.Block)
 
 	if ca {
-		switch g.caKey.GetType() {
+		switch p.caKey.GetType() {
 		case Rsa:
-			if keyPub, err = g.caKey.GetPublicRsa(); err != nil {
+			if keyPub, err = p.caKey.GetPublicRsa(); err != nil {
 				return nil, err
 			}
 		case Ecdsa:
-			if keyPub, err = g.caKey.GetPublicEcdsa(); err != nil {
+			if keyPub, err = p.caKey.GetPublicEcdsa(); err != nil {
 				return nil, err
 			}
 		case Ed25519:
-			if keyPub, err = g.caKey.GetPublicEd25519(); err != nil {
+			if keyPub, err = p.caKey.GetPublicEd25519(); err != nil {
 				return nil, err
 			}
 		case keyNotSet:
-			return nil, errors.New("ca key not set")
+			return nil, ErrCaPrivateKeyIsMissing
 		}
-		if pemBytes, err = g.caKey.EncodePrivateKeyAsPem(); err != nil {
+		if pemBytes, err = p.caKey.EncodePrivateKeyAsPem(); err != nil {
 			return nil, err
 		}
-		caCert = g.caCert
-		cert = g.caCert
+		caCert = p.caCert
+		cert = p.caCert
 	} else {
-		switch g.key.GetType() {
+		switch p.key.GetType() {
 		case Rsa:
-			if keyPub, err = g.key.GetPublicRsa(); err != nil {
+			if keyPub, err = p.key.GetPublicRsa(); err != nil {
 				return nil, err
 			}
 		case Ecdsa:
-			if keyPub, err = g.key.GetPublicEcdsa(); err != nil {
+			if keyPub, err = p.key.GetPublicEcdsa(); err != nil {
 				return nil, err
 			}
 		case Ed25519:
-			if keyPub, err = g.key.GetPublicEd25519(); err != nil {
+			if keyPub, err = p.key.GetPublicEd25519(); err != nil {
 				return nil, err
 			}
 		case keyNotSet:
-			return nil, errors.New("ca key not set")
+			return nil, ErrPrivateKeyNotSet
 		}
-		if pemBytes, err = g.key.EncodePrivateKeyAsPem(); err != nil {
+		if pemBytes, err = p.key.EncodePrivateKeyAsPem(); err != nil {
 			return nil, err
 		}
-		caCert = g.caCert
-		cert = g.cert
+		caCert = p.caCert
+		cert = p.cert
 	}
 
-	if pemBlock.Bytes, err = x509.CreateCertificate(rand.Reader, cert, caCert, keyPub, g.caKey); err != nil {
+	if pemBlock.Bytes, err = x509.CreateCertificate(rand.Reader, cert, caCert, keyPub, p.caKey); err != nil {
 		return nil, err
 	}
 	pemBlock.Type = "CERTIFICATE"
@@ -355,7 +373,7 @@ func (g *Pki) exportAsPem(ca bool) ([]byte, error) {
 	return pemBytes, nil
 }
 
-func (g *Pki) keyPairIsValid(priv crypto.PrivateKey, pub crypto.PublicKey) bool {
+func (p *Pki) keyPairIsValid(priv crypto.PrivateKey, pub crypto.PublicKey) bool {
 	type PrivateKey interface {
 		Public() crypto.PublicKey
 	}
@@ -381,4 +399,46 @@ func (g *Pki) keyPairIsValid(priv crypto.PrivateKey, pub crypto.PublicKey) bool 
 // NewPki returns a Pki pointer
 func NewPki() *Pki {
 	return new(Pki)
+}
+
+// ConvertPemDataToTlsCertificateStructure
+func ConvertPemDataToTlsCertificateStructure(pemBytes []byte) (*tls.Certificate, error) {
+	var err error
+	var pemBlock *pem.Block
+	var rest []byte
+	var tlsCertificate *tls.Certificate = new(tls.Certificate)
+	var crtDone, keyDone bool
+	tlsCertificate.Certificate = make([][]byte, 0)
+
+	for pemBlock, rest = pem.Decode(pemBytes); pemBlock != nil; pemBlock, rest = pem.Decode(rest) {
+		switch pemBlock.Type {
+		case "CERTIFICATE":
+			tlsCertificate.Certificate = append(tlsCertificate.Certificate, pemBlock.Bytes)
+			crtDone = true
+		case pemHeaderPrivateRSA:
+			if tlsCertificate.PrivateKey, err = x509.ParsePKCS1PrivateKey(pemBlock.Bytes); err != nil {
+				return nil, err
+			}
+			keyDone = true
+		case pemHeaderPrivateECDSA:
+			if tlsCertificate.PrivateKey, err = x509.ParseECPrivateKey(pemBlock.Bytes); err != nil {
+				return nil, err
+			}
+			keyDone = true
+		case pemHeaderPrivateED25519:
+			if tlsCertificate.PrivateKey, err = x509.ParsePKCS8PrivateKey(pemBlock.Bytes); err != nil {
+				return nil, err
+			}
+			keyDone = true
+		default:
+			return nil, fmt.Errorf("the pem block type \"%s\" is not supported", pemBlock.Type)
+		}
+	}
+	if !crtDone {
+		return nil, ErrCertificateNotFound
+	}
+	if !keyDone {
+		return nil, ErrPrivateKeyNotFound
+	}
+	return tlsCertificate, nil
 }
