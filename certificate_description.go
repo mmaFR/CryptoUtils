@@ -35,7 +35,7 @@ func (cd *CertificateDescription) GetCommonName() string {
 	return cd.commonName
 }
 func (cd *CertificateDescription) GetSubjectAlternativeNames() []string {
-	var san []string = make([]string, 0, len(cd.subjectAlternativeNames))
+	var san []string = make([]string, len(cd.subjectAlternativeNames))
 	copy(san, cd.subjectAlternativeNames)
 	return san
 }
